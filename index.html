@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>صانع فيديو القرآن (المصدر المباشر)</title>
+    
+    <!-- مكتبات React و Tailwind -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- خط الأميري -->
+    <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Amiri', serif; }
+        /* إخفاء شريط التمرير */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #10b981; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-slate-950 text-white min-h-screen flex flex-col items-center justify-center p-4">
+
+<div id="root" class="w-full max-w-5xl"></div>
+
+<script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // مصادر الصوت المباشرة (EveryAyah) - مستقرة جداً
+    const RECITERS = [
+        { id: 'Alafasy_128kbps', name: 'مشاري العفاسي' },
+        { id: 'Abdul_Basit_Murattal_64kbps', name: 'عبدالباسط عبدالصمد (مرتل)' },
+        { id: 'Husary_128kbps', name: 'محمود خليل الحصري' },
+        { id: 'Minshawy_Murattal_128kbps', name: 'محمد صديق المنشاوي' },
+        { id: 'MaherAlMuaiqly_64kbps', name: 'ماهر المعيقلي' },
+        { id: 'Ghamadi_40kbps', name: 'سعد الغامدي' }
+    ];
+
+    function App() {
+        const [surahs, setSurahs] = useState([]);
+        const [selectedSurah, setSelectedSurah] = useState(null);
+        const [reciter, setReciter] = useState(RECITERS[0].id);
+        const [startAyah, setStartAyah] = useState(1);
+        const [endAyah, setEndAyah] = useState(3);
+        
+        const [status, setStatus] = useState('idle'); // idle, processing, done, error
+        const [logs, setLogs] = useState('جاهز للبدء');
+        const [videoUrl, setVideoUrl] = useState(null);
+
+        const canvasRef = useRef(null);
+        const audioContextRef = useRef(null);
+        const mediaRecorderRef = useRef(null);
+        const chunksRef = useRef([]);
+
+        // جلب قائمة السور
+        useEffect(() => {
+            fetch('https://api.alquran.cloud/v1/surah')
+                .then(r => r.json())
+                .then(data => {
+                    setSurahs(data.data);
+                    setSelectedSurah(data.data[0]); // الفاتحة
+                })
+                .catch(e => setLogs("فشل في جلب قائمة السور، تأكد من الإنترنت"));
+        }, []);
+
+        // دالة تنسيق الأرقام لتناسب روابط الصوت (001001.mp3)
+        const formatNumber = (num) => String(num).padStart(3, '0');
+
+        // رسم النص على الكانفاس
+        const drawFrame = (text, ayahNum, surahName) => {
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+
+            canvas.width = 1280;
+            canvas.height = 720;
+
+            // خلفية
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // إطار زخرفي بسيط
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40);
+
+            // معلومات السورة
+            ctx.fillStyle = '#10b981';
+            ctx.font = 'bold 36px Amiri';
+            ctx.textAlign = 'center';
+            if(surahName) ctx.fillText(`سورة ${surahName}`, canvas.width / 2, 80);
+
+            // رقم الآية
+            ctx.fillStyle = '#64748b';
+            ctx.font = '30px Amiri';
+            if(ayahNum) ctx.fillText(`الآية ${ayahNum}`, canvas.width / 2, canvas.height - 60);
+
+            // نص الآية (التفاف الكلمات)
+            ctx.fillStyle = '#ffffff';
+            let fontSize = 70;
+            if (text.length > 200) fontSize = 50;
+            if (text.length > 400) fontSize = 40;
+            ctx.font = `${fontSize}px Amiri`;
+            ctx.textBaseline = 'middle';
+
+            const maxWidth = canvas.width - 200;
+            const words = text.split(' ');
+            let lines = [];
+            let currentLine = words[0];
+
+            for (let i = 1; i < words.length; i++) {
+                const word = words[i];
+                const width = ctx.measureText(currentLine + " " + word).width;
+                if (width < maxWidth) {
+                    currentLine += " " + word;
+                } else {
+                    lines.push(currentLine);
+                    currentLine = word;
+                }
+            }
+            lines.push(currentLine);
+
+            const lineHeight = fontSize * 1.6;
+            const startY = (canvas.height - (lines.length * lineHeight)) / 2 + (lineHeight/2);
+
+            lines.forEach((line, i) => {
+                ctx.fillText(line, canvas.width / 2, startY + (i * lineHeight));
+            });
+        };
+
+        // تهيئة أولية
+        useEffect(() => {
+            const t = setTimeout(() => drawFrame("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "", ""), 500);
+            return () => clearTimeout(t);
+        }, []);
+
+        // --- المحرك الرئيسي ---
+        const startCreation = async () => {
+            if (parseInt(startAyah) > parseInt(endAyah)) {
+                setLogs("خطأ: آية البداية أكبر من النهاية");
+                return;
+            }
+
+            setStatus('processing');
+            setVideoUrl(null);
+            setLogs("بدء التهيئة...");
+
+            try {
+                // 1. تفعيل AudioContext (يجب أن يتم داخل حدث المستخدم)
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                const actx = new AudioContext();
+                await actx.resume();
+                audioContextRef.current = actx;
+
+                // 2. إعداد المسجل
+                const canvas = canvasRef.current;
+                const canvasStream = canvas.captureStream(30); // 30 FPS
+                const audioDest = actx.createMediaStreamDestination();
+                
+                const combinedStream = new MediaStream([
+                    ...canvasStream.getVideoTracks(),
+                    ...audioDest.stream.getAudioTracks()
+                ]);
+
+                // محاولة استخدام كوديك متوافق
+                let mimeType = 'video/webm; codecs=vp9';
+                if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
+
+                const recorder = new MediaRecorder(combinedStream, { mimeType });
+                chunksRef.current = [];
+                recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+                
+                recorder.onstop = () => {
+                    const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+                    setVideoUrl(URL.createObjectURL(blob));
+                    setStatus('done');
+                    setLogs("تم الانتهاء! جاهز للتحميل.");
+                    actx.close();
+                };
+
+                recorder.start();
+                mediaRecorderRef.current = recorder;
+
+                // 3. حلقة المعالجة (آية آية)
+                for (let i = parseInt(startAyah); i <= parseInt(endAyah); i++) {
+                    setLogs(`جاري معالجة الآية ${i}...`);
+                    
+                    // جلب النص
+                    const textUrl = `https://api.alquran.cloud/v1/ayah/${selectedSurah.number}:${i}/quran-simple-enhanced`;
+                    const textRes = await fetch(textUrl);
+                    const textJson = await textRes.json();
+                    const text = textJson.data.text;
+                    const ayahNum = textJson.data.numberInSurah;
+
+                    // رسم النص
+                    drawFrame(text, ayahNum, selectedSurah.name);
+
+                    // تشغيل الصوت
+                    // رابط مباشر: server/SurahAyah.mp3 (001001.mp3)
+                    const audioUrl = `https://everyayah.com/data/${reciter}/${formatNumber(selectedSurah.number)}${formatNumber(i)}.mp3`;
+                    
+                    await playAudio(audioUrl, actx, audioDest);
+                    
+                    // فاصل قصير
+                    await new Promise(r => setTimeout(r, 400));
+                }
+
+                recorder.stop();
+
+            } catch (err) {
+                console.error(err);
+                setLogs(`حدث خطأ: ${err.message}`);
+                setStatus('error');
+                if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
+            }
+        };
+
+        const playAudio = (url, actx, dest) => {
+            return new Promise((resolve, reject) => {
+                const audio = new Audio();
+                audio.crossOrigin = "anonymous"; // هام جداً
+                audio.src = url;
+
+                // إنشاء المصدر فقط عندما يكون الصوت جاهزاً
+                const source = actx.createMediaElementSource(audio);
+                source.connect(dest); // للمسجل
+                source.connect(actx.destination); // للسماعة
+
+                audio.onended = () => {
+                    // source.disconnect(); // اختيارية
+                    resolve();
+                };
+                
+                audio.onerror = (e) => {
+                    setLogs(`فشل تحميل صوت الآية. جاري التخطي...`);
+                    resolve(); // نتخطى الخطأ لنكمل الفيديو
+                };
+
+                audio.play().catch(e => {
+                    setLogs("المتصفح منع التشغيل التلقائي. تأكد من التفاعل مع الصفحة.");
+                    resolve();
+                });
+            });
+        };
+
+        return (
+            <div className="bg-slate-900 rounded-2xl p-6 shadow-2xl w-full border border-slate-700">
+                <header className="text-center mb-8">
+                    <h1 className="text-3xl font-bold text-emerald-400 mb-2">منشئ القرآن المرئي</h1>
+                    <p className="text-slate-400 text-sm">إصدار الروابط المباشرة (EveryAyah)</p>
+                </header>
+
+                <div className="grid lg:grid-cols-3 gap-6">
+                    {/* الإعدادات */}
+                    <div className="lg:col-span-1 space-y-4">
+                        <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                            <label className="block text-slate-400 text-sm mb-1">السورة</label>
+                            <select 
+                                className="w-full bg-slate-950 border border-slate-600 rounded p-2 outline-none focus:border-emerald-500 transition"
+                                onChange={e => {
+                                    const s = surahs.find(x => x.number == e.target.value);
+                                    setSelectedSurah(s);
+                                    setStartAyah(1);
+                                    setEndAyah(3);
+                                }}
+                            >
+                                {surahs.map(s => <option key={s.number} value={s.number}>{s.number}. {s.name}</option>)}
+                            </select>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                                <label className="block text-slate-400 text-sm mb-1">من الآية</label>
+                                <input type="number" min="1" value={startAyah} onChange={e=>setStartAyah(e.target.value)} className="w-full bg-slate-950 border border-slate-600 rounded p-2 text-center" />
+                            </div>
+                            <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                                <label className="block text-slate-400 text-sm mb-1">إلى الآية</label>
+                                <input type="number" min="1" value={endAyah} onChange={e=>setEndAyah(e.target.value)} className="w-full bg-slate-950 border border-slate-600 rounded p-2 text-center" />
+                            </div>
+                        </div>
+
+                        <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                            <label className="block text-slate-400 text-sm mb-1">القارئ</label>
+                            <select 
+                                className="w-full bg-slate-950 border border-slate-600 rounded p-2 outline-none focus:border-emerald-500 transition"
+                                onChange={e => setReciter(e.target.value)}
+                            >
+                                {RECITERS.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                            </select>
+                        </div>
+
+                        <button 
+                            onClick={startCreation}
+                            disabled={status === 'processing'}
+                            className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${
+                                status === 'processing' 
+                                ? 'bg-slate-700 text-slate-500 cursor-not-allowed' 
+                                : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-lg shadow-emerald-900/50'
+                            }`}
+                        >
+                            {status === 'processing' ? 'جاري الإنشاء...' : 'بدء إنشاء الفيديو'}
+                        </button>
+
+                        {/* شاشة الحالة (Log) */}
+                        <div className="bg-black/50 p-3 rounded-lg text-xs font-mono text-emerald-300 border border-emerald-900/30 min-h-[50px] flex items-center justify-center text-center">
+                            {logs}
+                        </div>
+                    </div>
+
+                    {/* المعاينة */}
+                    <div className="lg:col-span-2 space-y-4">
+                        <div className="relative aspect-video bg-black rounded-xl overflow-hidden border border-slate-700 shadow-2xl">
+                            <canvas ref={canvasRef} className="w-full h-full object-contain"></canvas>
+                            {status === 'processing' && (
+                                <div className="absolute top-4 right-4 animate-pulse bg-red-600 text-white text-xs px-2 py-1 rounded-full flex items-center gap-2">
+                                    <div className="w-2 h-2 bg-white rounded-full"></div> جاري التسجيل
+                                </div>
+                            )}
+                        </div>
+
+                        {videoUrl && (
+                            <div className="animate-bounce-in bg-emerald-900/20 border border-emerald-500/50 p-6 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
+                                <div>
+                                    <h3 className="text-emerald-400 font-bold text-lg">تم إنشاء الفيديو!</h3>
+                                    <p className="text-slate-400 text-sm">سورة {selectedSurah?.name} ({startAyah} - {endAyah})</p>
+                                </div>
+                                <a 
+                                    href={videoUrl} 
+                                    download={`Quran_${selectedSurah?.number}_${reciter}.webm`}
+                                    className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-transform hover:scale-105"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                                    تحميل الفيديو
+                                </a>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+</script>
+
+</body>
+</html>
+
