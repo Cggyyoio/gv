@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>صانع فيديو القرآن (المصدر المباشر)</title>
+    <title>صانع فيديو القرآن (MP4/WebM)</title>
     
     <!-- مكتبات React و Tailwind -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -20,6 +20,11 @@
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #1e293b; }
         ::-webkit-scrollbar-thumb { background: #10b981; border-radius: 4px; }
+        .bounce-in { animation: bounceIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        @keyframes bounceIn {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
     </style>
 </head>
 <body class="bg-slate-950 text-white min-h-screen flex flex-col items-center justify-center p-4">
@@ -29,7 +34,7 @@
 <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
-    // مصادر الصوت المباشرة (EveryAyah) - مستقرة جداً
+    // مصادر الصوت المباشرة
     const RECITERS = [
         { id: 'Alafasy_128kbps', name: 'مشاري العفاسي' },
         { id: 'Abdul_Basit_Murattal_64kbps', name: 'عبدالباسط عبدالصمد (مرتل)' },
@@ -46,9 +51,10 @@
         const [startAyah, setStartAyah] = useState(1);
         const [endAyah, setEndAyah] = useState(3);
         
-        const [status, setStatus] = useState('idle'); // idle, processing, done, error
+        const [status, setStatus] = useState('idle');
         const [logs, setLogs] = useState('جاهز للبدء');
         const [videoUrl, setVideoUrl] = useState(null);
+        const [fileExt, setFileExt] = useState('webm'); // لتحديد الامتداد النهائي
 
         const canvasRef = useRef(null);
         const audioContextRef = useRef(null);
@@ -61,15 +67,14 @@
                 .then(r => r.json())
                 .then(data => {
                     setSurahs(data.data);
-                    setSelectedSurah(data.data[0]); // الفاتحة
+                    setSelectedSurah(data.data[0]); 
                 })
                 .catch(e => setLogs("فشل في جلب قائمة السور، تأكد من الإنترنت"));
         }, []);
 
-        // دالة تنسيق الأرقام لتناسب روابط الصوت (001001.mp3)
         const formatNumber = (num) => String(num).padStart(3, '0');
 
-        // رسم النص على الكانفاس
+        // رسم النص
         const drawFrame = (text, ayahNum, surahName) => {
             const canvas = canvasRef.current;
             if (!canvas) return;
@@ -82,12 +87,12 @@
             ctx.fillStyle = '#000000';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // إطار زخرفي بسيط
+            // إطار
             ctx.strokeStyle = '#10b981';
             ctx.lineWidth = 4;
             ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40);
 
-            // معلومات السورة
+            // العنوان
             ctx.fillStyle = '#10b981';
             ctx.font = 'bold 36px Amiri';
             ctx.textAlign = 'center';
@@ -98,7 +103,7 @@
             ctx.font = '30px Amiri';
             if(ayahNum) ctx.fillText(`الآية ${ayahNum}`, canvas.width / 2, canvas.height - 60);
 
-            // نص الآية (التفاف الكلمات)
+            // النص
             ctx.fillStyle = '#ffffff';
             let fontSize = 70;
             if (text.length > 200) fontSize = 50;
@@ -131,13 +136,30 @@
             });
         };
 
-        // تهيئة أولية
         useEffect(() => {
             const t = setTimeout(() => drawFrame("بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "", ""), 500);
             return () => clearTimeout(t);
         }, []);
 
-        // --- المحرك الرئيسي ---
+        // --- دالة تحديد أفضل صيغة فيديو ---
+        const getSupportedMimeType = () => {
+            const types = [
+                "video/mp4;codecs=h264,aac",
+                "video/mp4",
+                "video/webm;codecs=h264",
+                "video/webm;codecs=vp9,opus",
+                "video/webm"
+            ];
+            
+            for (const type of types) {
+                if (MediaRecorder.isTypeSupported(type)) {
+                    console.log(`تم اختيار الصيغة: ${type}`);
+                    return type;
+                }
+            }
+            return ""; // لا يوجد دعم
+        };
+
         const startCreation = async () => {
             if (parseInt(startAyah) > parseInt(endAyah)) {
                 setLogs("خطأ: آية البداية أكبر من النهاية");
@@ -149,15 +171,13 @@
             setLogs("بدء التهيئة...");
 
             try {
-                // 1. تفعيل AudioContext (يجب أن يتم داخل حدث المستخدم)
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
                 const actx = new AudioContext();
                 await actx.resume();
                 audioContextRef.current = actx;
 
-                // 2. إعداد المسجل
                 const canvas = canvasRef.current;
-                const canvasStream = canvas.captureStream(30); // 30 FPS
+                const canvasStream = canvas.captureStream(30);
                 const audioDest = actx.createMediaStreamDestination();
                 
                 const combinedStream = new MediaStream([
@@ -165,16 +185,30 @@
                     ...audioDest.stream.getAudioTracks()
                 ]);
 
-                // محاولة استخدام كوديك متوافق
-                let mimeType = 'video/webm; codecs=vp9';
-                if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'video/webm';
+                // تحديد نوع الملف (MP4 إذا أمكن)
+                const mimeType = getSupportedMimeType();
+                if (!mimeType) {
+                    throw new Error("المتصفح لا يدعم تسجيل الفيديو");
+                }
 
-                const recorder = new MediaRecorder(combinedStream, { mimeType });
+                // تحديد الامتداد بناءً على النوع المختار
+                if (mimeType.includes("mp4")) {
+                    setFileExt("mp4");
+                } else {
+                    setFileExt("webm");
+                    setLogs("ملاحظة: المتصفح لا يدعم MP4 مباشرة، سيتم التصدير بصيغة WebM");
+                }
+
+                const recorder = new MediaRecorder(combinedStream, { 
+                    mimeType: mimeType,
+                    videoBitsPerSecond: 2500000 // جودة عالية (2.5 Mbps)
+                });
+
                 chunksRef.current = [];
                 recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
                 
                 recorder.onstop = () => {
-                    const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+                    const blob = new Blob(chunksRef.current, { type: mimeType });
                     setVideoUrl(URL.createObjectURL(blob));
                     setStatus('done');
                     setLogs("تم الانتهاء! جاهز للتحميل.");
@@ -184,27 +218,19 @@
                 recorder.start();
                 mediaRecorderRef.current = recorder;
 
-                // 3. حلقة المعالجة (آية آية)
                 for (let i = parseInt(startAyah); i <= parseInt(endAyah); i++) {
                     setLogs(`جاري معالجة الآية ${i}...`);
                     
-                    // جلب النص
                     const textUrl = `https://api.alquran.cloud/v1/ayah/${selectedSurah.number}:${i}/quran-simple-enhanced`;
                     const textRes = await fetch(textUrl);
                     const textJson = await textRes.json();
                     const text = textJson.data.text;
                     const ayahNum = textJson.data.numberInSurah;
 
-                    // رسم النص
                     drawFrame(text, ayahNum, selectedSurah.name);
 
-                    // تشغيل الصوت
-                    // رابط مباشر: server/SurahAyah.mp3 (001001.mp3)
                     const audioUrl = `https://everyayah.com/data/${reciter}/${formatNumber(selectedSurah.number)}${formatNumber(i)}.mp3`;
-                    
                     await playAudio(audioUrl, actx, audioDest);
-                    
-                    // فاصل قصير
                     await new Promise(r => setTimeout(r, 400));
                 }
 
@@ -219,28 +245,23 @@
         };
 
         const playAudio = (url, actx, dest) => {
-            return new Promise((resolve, reject) => {
+            return new Promise((resolve) => {
                 const audio = new Audio();
-                audio.crossOrigin = "anonymous"; // هام جداً
+                audio.crossOrigin = "anonymous";
                 audio.src = url;
 
-                // إنشاء المصدر فقط عندما يكون الصوت جاهزاً
                 const source = actx.createMediaElementSource(audio);
-                source.connect(dest); // للمسجل
-                source.connect(actx.destination); // للسماعة
+                source.connect(dest);
+                source.connect(actx.destination);
 
-                audio.onended = () => {
-                    // source.disconnect(); // اختيارية
+                audio.onended = () => resolve();
+                audio.onerror = () => {
+                    setLogs(`فشل تحميل صوت الآية. جاري التخطي...`);
                     resolve();
                 };
-                
-                audio.onerror = (e) => {
-                    setLogs(`فشل تحميل صوت الآية. جاري التخطي...`);
-                    resolve(); // نتخطى الخطأ لنكمل الفيديو
-                };
 
-                audio.play().catch(e => {
-                    setLogs("المتصفح منع التشغيل التلقائي. تأكد من التفاعل مع الصفحة.");
+                audio.play().catch(() => {
+                    setLogs("يجب التفاعل مع الصفحة لتشغيل الصوت");
                     resolve();
                 });
             });
@@ -249,12 +270,11 @@
         return (
             <div className="bg-slate-900 rounded-2xl p-6 shadow-2xl w-full border border-slate-700">
                 <header className="text-center mb-8">
-                    <h1 className="text-3xl font-bold text-emerald-400 mb-2">منشئ القرآن المرئي</h1>
-                    <p className="text-slate-400 text-sm">إصدار الروابط المباشرة (EveryAyah)</p>
+                    <h1 className="text-3xl font-bold text-emerald-400 mb-2">منشئ القرآن (MP4/WebM)</h1>
+                    <p className="text-slate-400 text-sm">يدعم تصدير MP4 في المتصفحات الحديثة (Chrome/Edge)</p>
                 </header>
 
                 <div className="grid lg:grid-cols-3 gap-6">
-                    {/* الإعدادات */}
                     <div className="lg:col-span-1 space-y-4">
                         <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
                             <label className="block text-slate-400 text-sm mb-1">السورة</label>
@@ -301,39 +321,37 @@
                                 : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-lg shadow-emerald-900/50'
                             }`}
                         >
-                            {status === 'processing' ? 'جاري الإنشاء...' : 'بدء إنشاء الفيديو'}
+                            {status === 'processing' ? 'جاري المعالجة...' : 'بدء إنشاء الفيديو'}
                         </button>
 
-                        {/* شاشة الحالة (Log) */}
                         <div className="bg-black/50 p-3 rounded-lg text-xs font-mono text-emerald-300 border border-emerald-900/30 min-h-[50px] flex items-center justify-center text-center">
                             {logs}
                         </div>
                     </div>
 
-                    {/* المعاينة */}
                     <div className="lg:col-span-2 space-y-4">
                         <div className="relative aspect-video bg-black rounded-xl overflow-hidden border border-slate-700 shadow-2xl">
                             <canvas ref={canvasRef} className="w-full h-full object-contain"></canvas>
                             {status === 'processing' && (
                                 <div className="absolute top-4 right-4 animate-pulse bg-red-600 text-white text-xs px-2 py-1 rounded-full flex items-center gap-2">
-                                    <div className="w-2 h-2 bg-white rounded-full"></div> جاري التسجيل
+                                    <div className="w-2 h-2 bg-white rounded-full"></div> تسجيل {fileExt.toUpperCase()}
                                 </div>
                             )}
                         </div>
 
                         {videoUrl && (
-                            <div className="animate-bounce-in bg-emerald-900/20 border border-emerald-500/50 p-6 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
+                            <div className="bounce-in bg-emerald-900/20 border border-emerald-500/50 p-6 rounded-xl flex flex-col md:flex-row items-center justify-between gap-4">
                                 <div>
-                                    <h3 className="text-emerald-400 font-bold text-lg">تم إنشاء الفيديو!</h3>
-                                    <p className="text-slate-400 text-sm">سورة {selectedSurah?.name} ({startAyah} - {endAyah})</p>
+                                    <h3 className="text-emerald-400 font-bold text-lg">تم إنشاء الفيديو بنجاح!</h3>
+                                    <p className="text-slate-400 text-sm">التنسيق: {fileExt.toUpperCase()} | سورة {selectedSurah?.name}</p>
                                 </div>
                                 <a 
                                     href={videoUrl} 
-                                    download={`Quran_${selectedSurah?.number}_${reciter}.mp4`}
-                                    className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-transform hover:scale-105"
+                                    download={`Quran_${selectedSurah?.number}_${reciter}.${fileExt}`}
+                                    className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-6 py-3 rounded-lg font-bold flex items-center gap-2 transition-transform hover:scale-105 shadow-lg shadow-emerald-500/20"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                                    تحميل الفيديو
+                                    تحميل بصيغة {fileExt.toUpperCase()}
                                 </a>
                             </div>
                         )}
