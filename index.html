@@ -29,14 +29,19 @@
 <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
-    // مصادر الصوت المباشرة (EveryAyah) - مستقرة جداً
+    // تم تحديث قائمة القراء فقط
     const RECITERS = [
-        { id: 'Alafasy_128kbps', name: 'مشاري العفاسي' },
+        { id: 'Minshawy_Murattal_128kbps', name: 'محمد صديق المنشاوي (مرتل)' },
+        { id: 'Minshawy_Mujawwad_192kbps', name: 'محمد صديق المنشاوي (مجود)' },
         { id: 'Abdul_Basit_Murattal_64kbps', name: 'عبدالباسط عبدالصمد (مرتل)' },
-        { id: 'Husary_128kbps', name: 'محمود خليل الحصري' },
-        { id: 'Minshawy_Murattal_128kbps', name: 'محمد صديق المنشاوي' },
+        { id: 'Abdul_Basit_Mujawwad_128kbps', name: 'عبدالباسط عبدالصمد (مجود)' },
+        { id: 'Alafasy_128kbps', name: 'مشاري العفاسي' },
+        { id: 'Husary_128kbps', name: 'محمود خليل الحصري (مرتل)' },
+        { id: 'Husary_Mujawwad_128kbps', name: 'محمود خليل الحصري (مجود)' },
         { id: 'MaherAlMuaiqly_64kbps', name: 'ماهر المعيقلي' },
-        { id: 'Ghamadi_40kbps', name: 'سعد الغامدي' }
+        { id: 'Ghamadi_40kbps', name: 'سعد الغامدي' },
+        { id: 'Yasser_Ad-Dussary_128kbps', name: 'ياسر الدوسري' },
+        { id: 'Nasser_Alqatami_128kbps', name: 'ناصر القطامي' }
     ];
 
     function App() {
@@ -91,7 +96,7 @@
             ctx.fillStyle = '#10b981';
             ctx.font = 'bold 36px Amiri';
             ctx.textAlign = 'center';
-            if(surahName) ctx.fillText(` ${surahName}`, canvas.width / 2, 80);
+            if(surahName) ctx.fillText(`سورة ${surahName}`, canvas.width / 2, 80);
 
             // رقم الآية
             ctx.fillStyle = '#64748b';
